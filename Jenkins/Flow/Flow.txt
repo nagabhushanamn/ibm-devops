@@ -1,0 +1,250 @@
+
+
+-----------------------------
+1. JDK 1.8       
+2. Jenkins.war
+3. Maven         
+4. Node & NPM    
+5. Git           
+6. Docker        
+---------------------------------------------------------------
+
+1. A personal access token in GitHub.
+2. An SSH key pair from the Jenkins master.
+
+    a. Checking for existing SSH keys
+        > ls -al ~/.ssh
+    b. Generating a new SSH key and adding it to the ssh-agent
+
+        1. Generating a new SSH key
+            > ssh-keygen -t rsa -b 4096 -C "your_email@example.com"
+        2. Adding your SSH key to the ssh-agent
+            > eval "$(ssh-agent -s)"
+            > ssh-add -K ~/.ssh/id_rsa
+
+        3. Adding a new SSH key to your GitHub account   
+
+            Copy the SSH Public Key to GitHub
+            > pbcopy < ~/.ssh/id_rsa.pub
+
+        4. Copy the SSH Private Key to Jenkins 
+
+           -----------------------------
+            > ls -l ~/.ssh/id_rsa*  
+            > sudo nano ~/.ssh/id_rsa 
+            -----------------------------
+           
+3. GitHub plugin for Jenkins, with the necessary configurations.
+
+        a. Configuring the GitHub Plugin
+        b. Creating Webhooks in GitHub  ( optional )
+
+4. Maven, Git, and Java applications configured on Jenkins master. 
+
+5. Install the Pipeline Maven Integration Plugin ( later use )
+-------------------------------------------------------------------------------------
+
+
+
+Learning - Flow
+---------------  
+
+Level-1
+---------
+
+  a. Anatomy of Build
+  b. cloning the Sample Project 
+  c. Manual compilation with Maven
+  d. Manually Testing,Packaging, and Running the App
+
+
+   Jenkins's Freestyle project
+
+  a. Creating a Jenkins Job and Configuring a Git Repo
+  b. Compiling in Jenkins
+  c. Exploring Jenkins workspace
+  d. App packaging in Jenkins
+  e. Archiving artifacts
+  f. Cleaning up past Builds
+  g. Build-time trend
+  h. Exploring Jenkins's dashboard
+  i. Troubleshooting duild-failure
+
+
+-------------------------------------------
+
+
+
+CI & CD with Jenkin's Pipeline Project
+--------------------------------------
+
+
+
+
+
+
+
+
+level-1
+-------
+
+stage 'CI'
+node {
+
+    git branch: 'jenkins2-course', 
+        url: 'https://github.com/g0t4/solitaire-systemjs-course'
+
+    // pull dependencies from npm
+    // on windows use: bat 'npm install'
+    sh 'npm install'
+
+    // stash code & dependencies to expedite subsequent testing
+    // and ensure same code & dependencies are used throughout the pipeline
+    // stash is a temporary archive
+    stash name: 'everything', 
+          excludes: 'test-results/**', 
+          includes: '**'
+    
+    // test with PhantomJS for "fast" "generic" results
+    // on windows use: bat 'npm run test-single-run -- --browsers PhantomJS'
+    sh 'npm run test-single-run -- --browsers PhantomJS'
+    
+    // archive karma test results (karma is configured to export junit xml files)
+    step([$class: 'JUnitResultArchiver', 
+          testResults: 'test-results/**/test-results.xml'])
+          
+}
+
+def notify(status){
+    emailext (
+      to: "wesmdemos@gmail.com",
+      subject: "${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+      body: """<p>${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
+        <p>Check console output at <a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a></p>""",
+    )
+}
+
+
+level-2
+----------
+
+stage 'CI'
+
+node {
+
+    checkout scm
+
+    //git branch: 'jenkins2-course', 
+    //    url: 'https://github.com/g0t4/solitaire-systemjs-course'
+
+    // pull dependencies from npm
+    // on windows use: bat 'npm install'
+    sh 'npm install'
+
+    // stash code & dependencies to expedite subsequent testing
+    // and ensure same code & dependencies are used throughout the pipeline
+    // stash is a temporary archive
+    stash name: 'everything', 
+          excludes: 'test-results/**', 
+          includes: '**'
+    
+    // test with PhantomJS for "fast" "generic" results
+    // on windows use: bat 'npm run test-single-run -- --browsers PhantomJS'
+    sh 'npm run test-single-run -- --browsers PhantomJS'
+    
+    // archive karma test results (karma is configured to export junit xml files)
+    step([$class: 'JUnitResultArchiver', 
+          testResults: 'test-results/**/test-results.xml'])
+          
+}
+
+// demoing a second agent
+node('mac') {
+    // on windows use: bat 'dir'
+    sh 'ls'
+
+    // on windows use: bat 'del /S /Q *'
+    sh 'rm -rf *'
+
+    unstash 'everything'
+
+    // on windows use: bat 'dir'
+    sh 'ls'
+}
+
+//parallel integration testing
+stage 'Browser Testing'
+
+parallel chrome: {
+    runTests("Chrome")
+}, firefox: {
+    runTests("Firefox")
+}, safari: {
+    runTests("Safari")
+}
+
+def runTests(browser) {
+    node {
+        // on windows use: bat 'del /S /Q *'
+        sh 'rm -rf *'
+
+        unstash 'everything'
+
+        // on windows use: bat "npm run test-single-run -- --browsers ${browser}"
+        sh "npm run test-single-run -- --browsers ${browser}"
+
+        step([$class: 'JUnitResultArchiver', 
+              testResults: 'test-results/**/test-results.xml'])
+    }
+}
+
+node {
+    notify("Deploy to staging?")
+}
+
+input 'Deploy to staging?'
+
+// limit concurrency so we don't perform simultaneous deploys
+// and if multiple pipelines are executing, 
+// newest is only that will be allowed through, rest will be canceled
+stage name: 'Deploy to staging', concurrency: 1
+node {
+    // write build number to index page so we can see this update
+    // on windows use: bat "echo '<h1>${env.BUILD_DISPLAY_NAME}</h1>' >> app/index.html"
+    sh "echo '<h1>${env.BUILD_DISPLAY_NAME}</h1>' >> app/index.html"
+    
+    // deploy to a docker container mapped to port 3000
+    // on windows use: bat 'docker-compose up -d --build'
+    sh 'docker-compose up -d --build'
+    
+    notify 'Solitaire Deployed!'
+}
+
+def notify(status){
+    emailext (
+      to: "wesmdemos@gmail.com",
+      subject: "${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]'",
+      body: """<p>${status}: Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]':</p>
+        <p>Check console output at <a href='${env.BUILD_URL}'>${env.JOB_NAME} [${env.BUILD_NUMBER}]</a></p>""",
+    )
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
